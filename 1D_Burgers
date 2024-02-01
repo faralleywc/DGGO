@@ -1,0 +1,187 @@
+import numpy as np 
+import pandas as pd
+import os
+import random
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from timeit import default_timer
+from utilities import *
+from scipy import io
+from DGGO import dggo1d
+
+Seed = 3
+config1 = {
+          # "model_path": "model",
+          "dim": 2,
+          "output": 32,
+          "emb_dims": 256,
+          "k": 5,
+         }
+config2 = {
+          # "model_path": "model",
+          "dim": 32,
+          "output": 2,
+          "emb_dims": 256,
+          "k": 5,
+         }
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+sub = 2**5
+initial_resolution = 2 ** 13
+h = initial_resolution // sub
+idx = list(range(initial_resolution))
+
+def seed_torch(seed=Seed):
+	random.seed(seed)
+	os.environ['PYTHONHASHSEED'] = str(seed)
+	np.random.seed(seed)
+	torch.manual_seed(seed)
+	torch.cuda.manual_seed(seed)
+	torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
+	torch.backends.cudnn.benchmark = False
+	torch.backends.cudnn.deterministic = True
+	torch.backends.cudnn.enabled = False
+	# torch.use_deterministic_algorithms(True)
+seed_torch()
+
+# training setting
+early_stopping = EarlyStopping(200, True, 0, config3["model_path"])
+ntrain = 1000
+ntest = 100
+batch_size = 20
+learning_rate = 0.003
+epochs = 1200
+step_size = 50
+gamma = 0.75
+width = 64
+
+idx_ = np.ndarray((2048, h))
+for i in range(2048):
+    np.random.shuffle(idx)
+    idx_[i, :] = idx[:h]
+idx_ = idx_.astype(int)
+
+# dataset of arbitrary discritization
+X = np.linspace(0, 1, 2**13)
+X_data = np.expand_dims(X,0).repeat(2048, axis=0)
+X_data = torch.tensor(X_data, dtype=torch.float32)
+dataloader = MatReader('../data/1-D Burgers equation/burgers_data_R10.mat')
+x_data = dataloader.read_field('a')
+y_data = dataloader.read_field('u')
+x_data = x_data[np.arange(idx_.shape[0])[:, np.newaxis], idx_]
+y_data = y_data[np.arange(idx_.shape[0])[:, np.newaxis], idx_]
+X_data = X_data[np.arange(idx_.shape[0])[:, np.newaxis], idx_]
+
+x_train = x_data[:ntrain,:]
+y_train = y_data[:ntrain,:]
+x_test = x_data[-ntest:,:]
+y_test = y_data[-ntest:,:]
+X_train = X_data[:ntrain,:]
+X_test = X_data[-ntest:,:]
+
+x_train = x_train.reshape(ntrain, h, 1)
+x_test = x_test.reshape(ntest, h, 1)
+X_train = X_train.reshape(ntrain, h, 1)
+X_test = X_test.reshape(ntest, h, 1)
+print(x_train.shape, y_train.shape)
+print(x_test.shape, y_test.shape)
+
+x_train = torch.concatenate((x_train, X_train), axis = 2)
+x_test = torch.concatenate((x_test, X_test), axis = 2)
+train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train), batch_size=batch_size, shuffle=True)
+test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_test, y_test), batch_size=batch_size, shuffle=False)
+
+model = dggo1d(12, width, config1, config2).to(device)
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-6)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+
+    for ep in range(epochs):
+        # print(model.sigma1.item(), model.sigma2.item())
+        model.train()
+        # print(model.sigma1.item(), model.sigma2.item())
+        t1 = default_timer()
+        train_l1 = 0
+        train_l2 = 0
+        for x, y in train_loader:
+            x, y = x.to(device), y.to(device)
+
+            optimizer.zero_grad()
+            out = model(x)
+
+            l1 = myloss1(out[:, :, 1].view(batch_size, -1), x[:, :, 1].view(batch_size, -1))
+            l2 = myloss1(out[:, :, 0].view(batch_size, -1), y.view(batch_size, -1))
+            loss = l1 + l2
+            loss.backward() # l2 relative loss
+
+            optimizer.step()
+            train_l1 += l1.item()
+            train_l2 += l2.item()
+
+        scheduler.step()
+        model.eval()
+        test_l1 = 0.0
+        test_l2 = 0.0
+        with torch.no_grad():
+            for x, y in test_loader:
+                x, y = x.to(device), y.to(device)
+
+                out = model(x)
+                test_l1 += myloss1(out[:, :, 1].view(batch_size, -1), x[:, :, 1].view(batch_size, -1)).item()
+                test_l2 += myloss1(out[:, :, 0].view(batch_size, -1), y.view(batch_size, -1)).item()
+
+        train_l1 /= ntrain
+        train_l2 /= ntrain
+
+        test_l1 /= ntest
+        test_l2 /= ntest
+        
+        train_loss[ep] = train_l2
+        test_loss[ep] = test_l2
+        
+        t2 = default_timer()
+        print(ep, t2-t1, train_l1, train_l2, test_l1,  test_l2)
+        num_epcoh = ep
+        early_stopping(test_l2, model)
+        if early_stopping.early_stop:
+            break
+        print("-"*80)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
