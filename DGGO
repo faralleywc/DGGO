@@ -1,22 +1,8 @@
-class FNO1d_2(nn.Module):
+
+
+class dggo1d(nn.Module):
     def __init__(self, modes, width, config1, config2):
-        super(FNO1d_2, self).__init__()
-
-        """
-        The overall network. It contains 4 layers of the Fourier layer.
-        1. Lift the input to the desire channel dimension by self.fc0 .
-        2. 4 layers of the integral operators u' = (W + K)(u).
-            W defined by self.w; K defined by self.conv .
-        3. Project from the channel space to the output space by self.fc1 and self.fc2 .
-        
-        input: the solution of the initial condition and location (a(x), x)
-        input shape: (batchsize, x=s, c=2)
-        output: the solution of a later timestep
-        output shape: (batchsize, x=s, c=1)
-        """
-        # self.sigma1 = nn.Parameter(torch.tensor(2.0))
-        # self.sigma2 = nn.Parameter(torch.tensor(2.0))
-
+        super(dggo1d, self).__init__()
         self.sigma1 = 3
         self.sigma2 = 3
 
@@ -26,7 +12,7 @@ class FNO1d_2(nn.Module):
         self.width = width
         self.output1 = config1["output"]
         self.output2 = config2["output"]
-        self.fc0 = nn.Linear(self.output1, self.width)  # input channel is 2: (a(x), x)
+        self.fc0 = nn.Linear(self.output1, self.width)
 
         self.conv0 = SpectralConv1d(self.width, self.width, self.modes1)
         self.conv1 = SpectralConv1d(self.width, self.width, self.modes1)
@@ -36,12 +22,7 @@ class FNO1d_2(nn.Module):
         self.w1 = nn.Conv1d(self.width, self.width, 1)
         self.w2 = nn.Conv1d(self.width, self.width, 1)
         self.w3 = nn.Conv1d(self.width, self.width, 1)
-
         self.fc1 = nn.Linear(self.width, self.output1)
-
-        # self.fc2 = nn.Linear(self.output2, 1)
-        # self.fc1 = nn.Linear(self.width, 128)
-        # self.fc2 = nn.Linear(128, 1)
 
     def forward(self, x):
         x = self.dgcnn1(x)
